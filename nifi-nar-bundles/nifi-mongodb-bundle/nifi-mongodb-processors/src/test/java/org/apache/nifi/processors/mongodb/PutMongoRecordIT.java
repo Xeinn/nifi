@@ -16,7 +16,6 @@
  */
 package org.apache.nifi.processors.mongodb;
 
-
 import org.apache.avro.Schema;
 import org.apache.nifi.avro.AvroTypeUtil;
 import org.apache.nifi.components.ValidationResult;
@@ -29,6 +28,7 @@ import org.apache.nifi.schema.access.SchemaAccessUtils;
 import org.apache.nifi.serialization.SimpleRecordSchema;
 import org.apache.nifi.serialization.record.MapRecord;
 import org.apache.nifi.serialization.record.MockRecordParser;
+import org.apache.nifi.serialization.record.MockRecordWriter;
 import org.apache.nifi.serialization.record.MockSchemaRegistry;
 import org.apache.nifi.serialization.record.RecordField;
 import org.apache.nifi.serialization.record.RecordFieldType;
@@ -52,16 +52,21 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import com.mongodb.BasicDBObject;
+
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 public class PutMongoRecordIT extends MongoWriteTestBase {
 
     private MockRecordParser recordReader;
+    private MockRecordWriter recordWriter;
 
     @Before
     public void setup() throws Exception {
         super.setup(PutMongoRecord.class);
         recordReader = new MockRecordParser();
+        recordWriter = new MockRecordWriter();
     }
 
     @After
@@ -72,7 +77,9 @@ public class PutMongoRecordIT extends MongoWriteTestBase {
     private TestRunner init() throws InitializationException {
         TestRunner runner = init(PutMongoRecord.class);
         runner.addControllerService("reader", recordReader);
+        runner.addControllerService("writer", recordWriter);
         runner.enableControllerService(recordReader);
+        runner.enableControllerService(recordWriter);
         runner.setProperty(PutMongoRecord.RECORD_READER_FACTORY, "reader");
         return runner;
     }
@@ -169,6 +176,323 @@ public class PutMongoRecordIT extends MongoWriteTestBase {
         runner.run();
         runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
         assertEquals(5, collection.count());
+    }
+
+    private void setupData() {
+
+        recordReader.addSchemaField("_id", RecordFieldType.LONG);
+        recordReader.addSchemaField("name", RecordFieldType.STRING);
+        recordReader.addSchemaField("age", RecordFieldType.INT);
+        recordReader.addSchemaField("sport", RecordFieldType.STRING);
+
+        recordReader.addRecord(1, "John Doe", 48, "Soccer");
+        recordReader.addRecord(2, "Jane Doe", 47, "Tennis");
+        recordReader.addRecord(3, "Sally Doe", 47, "Curling");
+        recordReader.addRecord(1, "Jimmy Doe", 14, null);
+        recordReader.addRecord(5, "Pizza Doe", 14, null);
+    }
+
+    @Test
+    public void testIgnoreDuplicatesWithNoWriterConfigured() throws Exception {
+
+        TestRunner runner = init();
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testUpdateDuplicatesWithNoWriterConfigured() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "UPDATE");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
+
+        assertEquals(4, collection.countDocuments());
+
+        Document result = collection.find(new BasicDBObject("_id", 1)).first();
+
+        assertNotNull(result);
+        assertEquals(14, (int) result.getInteger("age"));
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testReplaceDuplicatesWithNoWriterConfigured() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "REPLACE");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
+
+        assertEquals(4, collection.countDocuments());
+
+        Document result = collection.find(new BasicDBObject("_id", 1)).first();
+
+        assertNotNull(result);
+        assertEquals(14, (int) result.getInteger("age"));
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testFailDuplicatesWithNoWriterConfigured() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "FAIL");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_FAILURE, 1);
+
+        assertEquals(3, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testIgnoreDuplicates() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
+
+        assertEquals(4, collection.countDocuments());
+
+        Document result = collection.find(new BasicDBObject("_id", 1)).first();
+
+        assertNotNull(result);
+        assertEquals(48, (int) result.getInteger("age"));
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testUpdateDuplicates() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "UPDATE");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testReplaceDuplicates() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "REPLACE");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testFailDuplicates() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "FAIL");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
+        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 1);
+
+        assertEquals(3, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testFailDuplicatesUnordered() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.ORDERED_INSERTS, "false");
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "FAIL");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
+        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 1);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testIgnoreuplicatesUnordered() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.ORDERED_INSERTS, "false");
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "IGNORE");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
+        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testUpdateuplicatesUnordered() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.ORDERED_INSERTS, "false");
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "UPDATE");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
+        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testReplaceuplicatesUnordered() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.ORDERED_INSERTS, "false");
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "REPLACE");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
+        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testInsertCountSmallerThanBatchReplaceDuplicatesUnordered() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.INSERT_COUNT, "3");
+        runner.setProperty(PutMongoRecord.ORDERED_INSERTS, "false");
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "REPLACE");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
+        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
+    public void testInsertCountSmallerThanBatchFailDuplicatesUnordered() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.INSERT_COUNT, "3");
+        runner.setProperty(PutMongoRecord.ORDERED_INSERTS, "false");
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "FAIL");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
+        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 1);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
     }
 
     @Test
