@@ -82,8 +82,6 @@ public class PutMongoRecord extends AbstractMongoProcessor {
             .description("All FlowFiles that are written to MongoDB are routed to this relationship").build();
     static final Relationship REL_FAILURE = new Relationship.Builder().name("failure")
             .description("All FlowFiles that cannot be written to MongoDB are routed to this relationship").build();
-    static final Relationship REL_RETRY = new Relationship.Builder().name("retry")
-            .description("All FlowFiles that can be retried are routed to this relationship").build();
 
     static final PropertyDescriptor RECORD_READER_FACTORY = new PropertyDescriptor.Builder()
             .name("record-reader")
@@ -122,7 +120,7 @@ public class PutMongoRecord extends AbstractMongoProcessor {
     static final PropertyDescriptor DUPLICATE_HANDLING = new PropertyDescriptor.Builder()
             .name("duplicate_handling")
             .displayName("Duplicate Handling")
-            .description("Defines the action to be taken when a duplicate record is reported by MongoDB when trying to insert a record from a FlowFile.  Options are IGNORE, UPDATE or REPLACE")
+            .description("Defines the action to be taken when a duplicate record is reported by MongoDB when trying to insert a record from a FlowFile.")
             .defaultValue("IGNORE")
             .required(false)
             .allowableValues(DuplicateHandling.values())
@@ -165,7 +163,6 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         final Set<Relationship> _relationships = new HashSet<>();
         _relationships.add(REL_SUCCESS);
         _relationships.add(REL_FAILURE);
-        _relationships.add(REL_RETRY);
         relationships = Collections.unmodifiableSet(_relationships);
     }
 
@@ -173,7 +170,8 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         IGNORE,
         UPDATE,
         REPLACE,
-        FAIL
+        FAIL,
+        DROP
     }
 
     private enum InsertResultType {
@@ -183,7 +181,8 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         IGNORED,
         FAILED,
         DUPLICATE,
-        SKIPPED
+        SKIPPED,
+        DROPPED
     }
 
     private static class InsertResult {
@@ -323,7 +322,6 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         final FlowFile inputFlowFile = flowFile;
         final FlowFile successFlowFile = session.create(inputFlowFile);
         final FlowFile failedFlowFile = session.create(inputFlowFile);
-//        final FlowFile skippedFlowFile = session.create(inputFlowFile);
 
         long successfulCount = results.stream().filter(e -> e.getType().equals(InsertResultType.INSERTED) || e.getType().equals(InsertResultType.UPDATED)
                 || e.getType().equals(InsertResultType.REPLACED) || e.getType().equals(InsertResultType.IGNORED)).count();
@@ -332,7 +330,6 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         // Set up the reader and writers
         try (final OutputStream successOut = session.write(successFlowFile);
             final OutputStream failedOut = session.write(failedFlowFile);
-//            final OutputStream skippedOut = session.write(skippedFlowFile);
             final InputStream in = session.read(inputFlowFile);
             final RecordReader resultReader = readerFactory.createRecordReader(inputFlowFile, in, getLogger())) {
 
@@ -340,11 +337,9 @@ public class PutMongoRecord extends AbstractMongoProcessor {
 
             try (final RecordSetWriter successWriter = writerFactory.createWriter(getLogger(), schema, successOut, successFlowFile);
                 final RecordSetWriter failedWriter = writerFactory.createWriter(getLogger(), schema, failedOut, failedFlowFile)) {
-//                final RecordSetWriter skippedWriter = writerFactory.createWriter(getLogger(), schema, skippedOut, skippedFlowFile)) {
 
                 successWriter.beginRecordSet();
                 failedWriter.beginRecordSet();
-//                skippedWriter.beginRecordSet();
 
                 // For each record, if it's in the failure set write it to the failure FF, otherwise it succeeded.
                 Record resultRecord;
@@ -358,11 +353,12 @@ public class PutMongoRecord extends AbstractMongoProcessor {
                         case IGNORED:
                             successWriter.write(resultRecord);
                             break;
-
                         case FAILED:
-                        case DUPLICATE:
                         case SKIPPED:
+                        case DUPLICATE:
                             failedWriter.write(resultRecord);
+                            break;
+                        case DROPPED:
                             break;
                     }
                 }
@@ -377,9 +373,6 @@ public class PutMongoRecord extends AbstractMongoProcessor {
             if (failedFlowFile != null) {
                 session.remove(failedFlowFile);
             }
-            // if (skippedFlowFile != null) {
-            //     session.remove(skippedFlowFile);
-            // }
             return;
         }
 
@@ -388,10 +381,8 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         // Normal behavior is to output with record.count. In order to not break backwards compatibility, set both here.
         session.putAttribute(failedFlowFile, "record.count", Long.toString(failureCount));
         session.putAttribute(failedFlowFile, "failure.count", Long.toString(failureCount));
-//        session.putAttribute(skippedFlowFile, "record.count", Long.toString(results.size() - (successfulCount + failureCount)));
         session.transfer(successFlowFile, REL_SUCCESS);
         session.transfer(failedFlowFile, REL_FAILURE);
-//        session.transfer(skippedFlowFile, REL_RETRY);
         session.remove(inputFlowFile);
     }
 
@@ -403,6 +394,7 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         final InsertResult updated = new InsertResult(InsertResultType.UPDATED);
         final InsertResult ignored = new InsertResult(InsertResultType.IGNORED);
         final InsertResult skipped = new InsertResult(InsertResultType.SKIPPED);
+        final InsertResult dropped = new InsertResult(InsertResultType.DROPPED);
 
         List<InsertResult> results = new ArrayList<>(inserts.size());
 
@@ -493,7 +485,9 @@ public class PutMongoRecord extends AbstractMongoProcessor {
 
                         if(result.getType().equals(InsertResultType.DUPLICATE)) {
 
-                            if(duplicateHandling.equals(DuplicateHandling.IGNORE)) {
+                            if(duplicateHandling.equals(DuplicateHandling.DROP)) {
+                                results.set(insertIndex, dropped);
+                            } else if(duplicateHandling.equals(DuplicateHandling.IGNORE)) {
                                 results.set(insertIndex, ignored);
                             } else {
                                 try {

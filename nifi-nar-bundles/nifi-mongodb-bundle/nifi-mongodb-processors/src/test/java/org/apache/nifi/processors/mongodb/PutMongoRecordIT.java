@@ -362,6 +362,27 @@ public class PutMongoRecordIT extends MongoWriteTestBase {
     }
 
     @Test
+    public void testDropDuplicates() throws Exception {
+
+        TestRunner runner = init();
+
+        runner.setProperty(PutMongoRecord.DUPLICATE_HANDLING, "DROP");
+        runner.setProperty(PutMongoRecord.RECORD_WRITER_FACTORY, "writer");
+
+        setupData();
+
+        runner.enqueue("");
+        runner.run();
+
+        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
+        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+
+        assertEquals(4, collection.countDocuments());
+
+        runner.clearTransferState();
+    }
+
+    @Test
     public void testFailDuplicatesUnordered() throws Exception {
 
         TestRunner runner = init();
