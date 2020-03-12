@@ -374,8 +374,7 @@ public class PutMongoRecordIT extends MongoWriteTestBase {
         runner.enqueue("");
         runner.run();
 
-        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
-        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
 
         assertEquals(4, collection.countDocuments());
 
@@ -418,8 +417,7 @@ public class PutMongoRecordIT extends MongoWriteTestBase {
         runner.enqueue("");
         runner.run();
 
-        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
-        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
 
         assertEquals(4, collection.countDocuments());
 
@@ -440,8 +438,7 @@ public class PutMongoRecordIT extends MongoWriteTestBase {
         runner.enqueue("");
         runner.run();
 
-        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
-        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
 
         assertEquals(4, collection.countDocuments());
 
@@ -462,8 +459,7 @@ public class PutMongoRecordIT extends MongoWriteTestBase {
         runner.enqueue("");
         runner.run();
 
-        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
-        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
 
         assertEquals(4, collection.countDocuments());
 
@@ -485,8 +481,7 @@ public class PutMongoRecordIT extends MongoWriteTestBase {
         runner.enqueue("");
         runner.run();
 
-        runner.assertTransferCount(PutMongoRecord.REL_SUCCESS, 1);
-        runner.assertTransferCount(PutMongoRecord.REL_FAILURE, 0);
+        runner.assertAllFlowFilesTransferred(PutMongoRecord.REL_SUCCESS, 1);
 
         assertEquals(4, collection.countDocuments());
 

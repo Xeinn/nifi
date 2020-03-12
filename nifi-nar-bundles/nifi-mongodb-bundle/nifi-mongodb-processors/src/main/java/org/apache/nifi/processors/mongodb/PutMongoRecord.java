@@ -323,9 +323,8 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         final FlowFile successFlowFile = session.create(inputFlowFile);
         final FlowFile failedFlowFile = session.create(inputFlowFile);
 
-        long successfulCount = results.stream().filter(e -> e.getType().equals(InsertResultType.INSERTED) || e.getType().equals(InsertResultType.UPDATED)
-                || e.getType().equals(InsertResultType.REPLACED) || e.getType().equals(InsertResultType.IGNORED)).count();
-        long failureCount = results.stream().filter(e -> e.getType().equals(InsertResultType.FAILED)).count();
+        long successfulCount = 0;
+        long failureCount = 0;
 
         // Set up the reader and writers
         try (final OutputStream successOut = session.write(successFlowFile);
@@ -352,11 +351,13 @@ public class PutMongoRecord extends AbstractMongoProcessor {
                         case REPLACED:
                         case IGNORED:
                             successWriter.write(resultRecord);
+                            ++successfulCount;
                             break;
                         case FAILED:
                         case SKIPPED:
                         case DUPLICATE:
                             failedWriter.write(resultRecord);
+                            ++failureCount;
                             break;
                         case DROPPED:
                             break;
@@ -376,13 +377,20 @@ public class PutMongoRecord extends AbstractMongoProcessor {
             return;
         }
 
-        session.putAttribute(successFlowFile, "record.count", Long.toString(successfulCount));
+        if(successfulCount > 0) {
+            session.putAttribute(successFlowFile, "record.count", Long.toString(successfulCount));
+            session.transfer(successFlowFile, REL_SUCCESS);
+        } else {
+            session.remove(successFlowFile);
+        }
 
-        // Normal behavior is to output with record.count. In order to not break backwards compatibility, set both here.
-        session.putAttribute(failedFlowFile, "record.count", Long.toString(failureCount));
-        session.putAttribute(failedFlowFile, "failure.count", Long.toString(failureCount));
-        session.transfer(successFlowFile, REL_SUCCESS);
-        session.transfer(failedFlowFile, REL_FAILURE);
+        if(failureCount > 0) {
+            session.putAttribute(failedFlowFile, "record.count", Long.toString(failureCount));
+            session.transfer(failedFlowFile, REL_FAILURE);
+        } else {
+            session.remove(failedFlowFile);
+        }
+
         session.remove(inputFlowFile);
     }
 
