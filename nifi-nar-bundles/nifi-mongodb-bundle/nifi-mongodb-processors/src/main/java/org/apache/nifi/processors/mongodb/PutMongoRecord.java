@@ -262,6 +262,8 @@ public class PutMongoRecord extends AbstractMongoProcessor {
 
         int ceiling = context.getProperty(INSERT_COUNT).asInteger();
 
+        boolean error = false;
+
         try (final InputStream inStream = session.read(flowFile);
              final RecordReader reader = recordParserFactory.createRecordReader(flowFile, inStream, getLogger())) {
 
@@ -290,27 +292,31 @@ public class PutMongoRecord extends AbstractMongoProcessor {
         } catch (Exception ex) {
             getLogger().error("PutMongoRecord failed with error:", ex);
             session.transfer(flowFile, REL_FAILURE);
+            error = true;
         }
 
-        // Were all inserts successful
+        // Check if error occurred
+        if(!error) {
+            // Were all inserts successful
 
-        long successfulCount = results.stream().filter(e -> e.getType().equals(InsertResultType.INSERTED) || e.getType().equals(InsertResultType.UPDATED)
-                || e.getType().equals(InsertResultType.REPLACED) || e.getType().equals(InsertResultType.IGNORED)).count();
+            long successfulCount = results.stream().filter(e -> e.getType().equals(InsertResultType.INSERTED) || e.getType().equals(InsertResultType.UPDATED)
+                    || e.getType().equals(InsertResultType.REPLACED) || e.getType().equals(InsertResultType.IGNORED)).count();
 
-        if(successfulCount == results.size()) {
+            if(successfulCount == results.size()) {
 
-            // Everything was successful, report the results
-            String url = clientService != null ? clientService.getURI() : context.getProperty(URI).evaluateAttributeExpressions().getValue();
-            session.getProvenanceReporter().send(flowFile, url, String.format("Added %d documents to MongoDB.", successfulCount));
-            session.transfer(flowFile, REL_SUCCESS);
-            getLogger().info("Inserted {} records into MongoDB", new Object[]{ successfulCount });
-        } else {
-
-            if(writerFactoryOptional.isPresent()) {
-                splitFlowFileOutput(session, recordParserFactory, writerFactoryOptional.get(), results, flowFile);
+                // Everything was successful, report the results
+                String url = clientService != null ? clientService.getURI() : context.getProperty(URI).evaluateAttributeExpressions().getValue();
+                session.getProvenanceReporter().send(flowFile, url, String.format("Added %d documents to MongoDB.", successfulCount));
+                session.transfer(flowFile, REL_SUCCESS);
+                getLogger().info("Inserted {} records into MongoDB", new Object[]{ successfulCount });
             } else {
-                getLogger().error("PutMongoRecord failed to write all records");
-                session.transfer(flowFile, REL_FAILURE);
+
+                if(writerFactoryOptional.isPresent()) {
+                    splitFlowFileOutput(session, recordParserFactory, writerFactoryOptional.get(), results, flowFile);
+                } else {
+                    getLogger().error("PutMongoRecord failed to write all records");
+                    session.transfer(flowFile, REL_FAILURE);
+                }
             }
         }
 
